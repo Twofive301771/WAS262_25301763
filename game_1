@@ -1,0 +1,101 @@
+
+// Get the canvas
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+// Ball properties
+let ball = {
+    x: 400,
+    y: 250,
+    radius: 20,
+    speed: 5
+};
+
+// Keep track of which keys are being pressed
+const keys = {};
+
+// Detect when a key is pressed
+document.addEventListener("keydown", function (event) {
+    keys[event.key.toLowerCase()] = true;
+});
+
+// Detect when a key is released
+document.addEventListener("keyup", function (event) {
+    keys[event.key.toLowerCase()] = false;
+});
+
+// Update the ball's position
+function update() {
+
+    // W or Arrow Up
+    if (keys["w"] || keys["arrowup"]) {
+        ball.y -= ball.speed;
+    }
+
+    // S or Arrow Down
+    if (keys["s"] || keys["arrowdown"]) {
+        ball.y += ball.speed;
+    }
+
+    // A or Arrow Left
+    if (keys["a"] || keys["arrowleft"]) {
+        ball.x -= ball.speed;
+    }
+
+    // D or Arrow Right
+    if (keys["d"] || keys["arrowright"]) {
+        ball.x += ball.speed;
+    }
+
+    // Prevent ball from leaving the canvas
+    if (ball.x - ball.radius < 0) {
+        ball.x = ball.radius;
+    }
+
+    if (ball.x + ball.radius > canvas.width) {
+        ball.x = canvas.width - ball.radius;
+    }
+
+    if (ball.y - ball.radius < 0) {
+        ball.y = ball.radius;
+    }
+
+    if (ball.y + ball.radius > canvas.height) {
+        ball.y = canvas.height - ball.radius;
+    }
+}
+
+// Draw everything
+function draw() {
+
+    // Clear the canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw the ball
+    ctx.beginPath();
+    ctx.arc(
+        ball.x,
+        ball.y,
+        ball.radius,
+        0,
+        Math.PI * 2
+    );
+
+    ctx.fillStyle = "red";
+    ctx.fill();
+
+    ctx.closePath();
+}
+
+// Game loop
+function gameLoop() {
+
+    update();
+    draw();
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Start the game
+gameLoop();
+

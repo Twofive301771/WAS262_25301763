@@ -1,0 +1,1923 @@
+
+//canvas//
+
+const canvas = document.getElementById("gameCanvas");
+
+const context = canvas.getContext("2d");
+
+//all constants//
+
+const GAME_DURATION = 60;
+
+const PLAYER_SPEED = 400;
+
+const PLAYER_ACCELERATION = 800;
+
+const PLAYER_DRAG = 0.90;
+
+const MAX_BATTERY = 100;
+
+const ENERGY_CONSUMPTION = 8;
+
+const DELIVERY_SCORE = 100;
+
+//all game states//
+
+//playing, times up, results screen //
+
+let timeRemaining = GAME_DURATION;
+
+let lastTime = 0;
+
+let gameState = "playing";
+
+let deliveries = 0;
+
+let score = 0;
+
+let teleportMessage = "";
+
+let teleportMessageTimer = 0;
+
+//controls on keyboard//
+
+const keys = new Set();
+
+window.addEventListener("keydown", (event) => {
+
+    const key = event.key.toLowerCase();
+
+    keys.add(key);
+
+    // Prevent browser scrolling
+
+    if (
+        ["arrowup", "arrowdown", "arrowleft", "arrowright", " "]
+            .includes(key)
+    ) {
+
+        event.preventDefault();
+
+    }
+
+    // TIME'S UP -> RESULTS
+
+    if (
+        key === "enter" &&
+        gameState === "timesUp"
+    ) {
+
+        gameState = "results";
+
+    }
+
+    // RESULTS -> RESTART
+
+    if (
+        key === "r" &&
+        gameState === "results"
+    ) {
+
+        restartGame();
+
+    }
+
+});
+
+window.addEventListener("keyup", (event) => {
+
+    keys.delete(event.key.toLowerCase());
+
+});
+
+//collision//
+
+function isColliding(a, b) {
+
+    return (
+        a.x < b.x + b.width &&
+        a.x + a.width > b.x &&
+        a.y < b.y + b.height &&
+        a.y + a.height > b.y
+    );
+
+}
+
+//town buildings//
+
+const buildings = [
+
+    //first row//
+
+    {
+        name: "Building 1",
+
+        x: 40,
+
+        y: 65,
+
+        width: 170,
+
+        height: 100
+
+    },
+
+    {
+        name: "Building 2",
+
+        x: 255,
+
+        y: 65,
+
+        width: 170,
+
+        height: 100
+
+    },
+
+    {
+        name: "Building 3",
+
+        x: 470,
+
+        y: 65,
+
+        width: 170,
+
+        height: 100
+
+    },
+
+    {
+        name: "Building 4",
+
+        x: 685,
+
+        y: 65,
+
+        width: 170,
+
+        height: 100
+
+    },
+
+    //row 2//
+
+    {
+        name: "buidling 5",
+
+        x: 40,
+
+        y: 300,
+
+        width: 170,
+
+        height: 100
+
+    },
+
+    {
+        name: "building 6",
+
+        x: 255,
+
+        y: 300,
+
+        width: 170,
+
+        height: 100
+
+    },
+
+    {
+        name: "building 7",
+
+        x: 470,
+
+        y: 300,
+
+        width: 170,
+
+        height: 100
+
+    },
+
+    {
+        name: "Electric station",
+
+        x: 685,
+
+        y: 300,
+
+        width: 170,
+
+        height: 100,
+
+        recharge: true
+
+    }
+
+];
+
+//roads//
+
+const roads = [
+
+    //horizontal roads//
+
+    {
+        x: 0,
+
+        y: 0,
+
+        width: 900,
+
+        height: 40
+
+    },
+
+    // Road between building rows
+
+    {
+        x: 0,
+
+        y: 205,
+
+        width: 900,
+
+        height: 60
+
+    },
+
+    // Bottom road
+
+    {
+        x: 0,
+
+        y: 440,
+
+        width: 900,
+
+        height: 60
+
+    },
+
+    //vertical roads//
+
+    // Left road
+
+    {
+        x: 0,
+
+        y: 0,
+
+        width: 25,
+
+        height: 500
+
+    },
+
+    //between buildings//
+
+    {
+        x: 210,
+
+        y: 0,
+
+        width: 45,
+
+        height: 500
+
+    },
+
+    {
+        x: 425,
+
+        y: 0,
+
+        width: 45,
+
+        height: 500
+
+    },
+
+    {
+        x: 640,
+
+        y: 0,
+
+        width: 45,
+
+        height: 500
+
+    },
+
+    // Right road
+
+    {
+        x: 855,
+
+        y: 0,
+
+        width: 45,
+
+        height: 500
+
+    }
+
+];
+
+//delivery points//
+
+const deliveryPoints = buildings
+
+    .filter(building => !building.recharge)
+
+    .map(building => {
+
+        const pointWidth = 50;
+
+        const pointHeight = 18;
+
+        return {
+
+            name: building.name,
+
+            x:
+                building.x +
+                building.width / 2 -
+                pointWidth / 2,
+
+            y:
+                building.y < 200
+                    ? building.y + building.height + 15
+                    : building.y - pointHeight - 15,
+
+            width: pointWidth,
+
+            height: pointHeight,
+
+            building: building
+
+        };
+
+    });
+
+
+//keeps packages to spawn on road only//
+
+function isOnRoad(object) {
+
+    return roads.some(road =>
+        isColliding(object, road)
+    );
+
+}
+
+function isInsideBuilding(object) {
+
+    return buildings.some(building => {
+
+        // Electric station can be entered
+
+        if (building.recharge) {
+
+            return false;
+
+        }
+
+        return isColliding(
+            object,
+            building
+        );
+
+    });
+
+}
+
+function isValidPackagePosition(object, destination) {
+
+    // Package must be on a road
+
+    if (!isOnRoad(object)) {
+
+        return false;
+
+    }
+
+    // Package cannot be inside buildings
+
+    if (isInsideBuilding(object)) {
+
+        return false;
+
+    }
+
+    // Package cannot spawn at destination
+
+    if (
+        destination &&
+        isColliding(object, destination)
+    ) {
+
+        return false;
+
+    }
+
+    return true;
+
+}
+
+//electric station//
+
+const chargeBuilding = buildings.find(
+    building => building.recharge
+);
+
+const chargeZone = {
+
+    x: chargeBuilding.x,
+
+    y: chargeBuilding.y,
+
+    width: chargeBuilding.width,
+
+    height: chargeBuilding.height,
+
+    rechargeRate: 25
+
+};
+
+function playerInsideChargeZone() {
+
+    return isColliding(
+        player,
+        chargeZone
+    );
+
+}
+
+//player//
+
+class PlayerVehicle {
+
+    constructor(x, y) {
+
+        this.x = x;
+
+        this.y = y;
+
+        this.width = 18;
+
+        this.height = 18;
+
+        // Physics
+
+        this.velocityX = 0;
+
+        this.velocityY = 0;
+
+        this.acceleration =
+            PLAYER_ACCELERATION;
+
+        this.maxSpeed =
+            PLAYER_SPEED;
+
+        this.drag =
+            PLAYER_DRAG;
+
+        // Direction
+
+        this.angle = 0;
+
+        // Battery
+
+        this.battery =
+            MAX_BATTERY;
+
+        this.maxBattery =
+            MAX_BATTERY;
+
+        this.energyConsumption =
+            ENERGY_CONSUMPTION;
+
+        // Package
+
+        this.carryingPackage =
+            false;
+
+    }
+
+    //input on wasd//
+
+    getInputDirection() {
+
+        let directionX = 0;
+
+        let directionY = 0;
+
+        if (
+            keys.has("arrowup") ||
+            keys.has("w")
+        ) {
+
+            directionY -= 1;
+
+        }
+
+        if (
+            keys.has("arrowdown") ||
+            keys.has("s")
+        ) {
+
+            directionY += 1;
+
+        }
+
+        if (
+            keys.has("arrowleft") ||
+            keys.has("a")
+        ) {
+
+            directionX -= 1;
+
+        }
+
+        if (
+            keys.has("arrowright") ||
+            keys.has("d")
+        ) {
+
+            directionX += 1;
+
+        }
+
+        return {
+
+            x: directionX,
+
+            y: directionY
+
+        };
+
+    }
+
+    //movement physics//
+
+    update(deltaTime) {
+
+        const direction =
+            this.getInputDirection();
+
+        const moving =
+            direction.x !== 0 ||
+            direction.y !== 0;
+
+        //movement//
+
+        if (
+            moving &&
+            this.battery > 0
+        ) {
+
+            // Normalize diagonal movement
+
+            const length =
+                Math.hypot(
+                    direction.x,
+                    direction.y
+                );
+
+            direction.x /=
+                length;
+
+            direction.y /=
+                length;
+
+            // Calculate movement angle
+
+            this.angle =
+                Math.atan2(
+                    direction.y,
+                    direction.x
+                );
+
+            // Trigonometry
+
+            const cosAngle =
+                Math.cos(this.angle);
+
+            const sinAngle =
+                Math.sin(this.angle);
+
+            // Acceleration
+
+            this.velocityX +=
+                cosAngle *
+                this.acceleration *
+                deltaTime;
+
+            this.velocityY +=
+                sinAngle *
+                this.acceleration *
+                deltaTime;
+
+        }
+
+        //limit player speed//
+
+        const speed =
+            Math.hypot(
+                this.velocityX,
+                this.velocityY
+            );
+
+        if (
+            speed >
+            this.maxSpeed
+        ) {
+
+            const scale =
+                this.maxSpeed /
+                speed;
+
+            this.velocityX *=
+                scale;
+
+            this.velocityY *=
+                scale;
+
+        }
+
+        //movement and collision//
+
+        if (
+            this.battery > 0
+        ) {
+
+            this.moveWithCollision(
+
+                this.velocityX *
+                deltaTime,
+
+                this.velocityY *
+                deltaTime
+
+            );
+
+        }
+
+        //friction//
+
+        const dragAmount =
+            Math.pow(
+                this.drag,
+                deltaTime * 60
+            );
+
+        this.velocityX *=
+            dragAmount;
+
+        this.velocityY *=
+            dragAmount;
+
+        //battery charge//
+
+        if (
+            moving &&
+            this.battery > 0
+        ) {
+
+            this.battery -=
+                this.energyConsumption *
+                deltaTime;
+
+            if (
+                this.battery <= 0
+            ) {
+
+                this.battery = 0;
+
+                this.velocityX = 0;
+
+                this.velocityY = 0;
+
+                teleportMessage =
+                    "Battery empty! Returning to recharge station";
+
+                teleportMessageTimer =
+                    2.5;
+
+                this.returnToChargingZone();
+
+            }
+
+        }
+
+        //keep player from leaving the screen//
+
+        keepPlayerInsideCanvas();
+
+    }
+
+    //movement with collision//
+
+    moveWithCollision(dx, dy) {
+
+        // Horizontal
+
+        this.x += dx;
+
+        if (
+            this.collidesWithBuilding()
+        ) {
+
+            this.x -= dx;
+
+            this.velocityX = 0;
+
+        }
+
+        // Vertical
+
+        this.y += dy;
+
+        if (
+            this.collidesWithBuilding()
+        ) {
+
+            this.y -= dy;
+
+            this.velocityY = 0;
+
+        }
+
+    }
+
+    collidesWithBuilding() {
+
+        return buildings.some(
+            building => {
+
+                // Electric grid is accessible
+
+                if (
+                    building.recharge
+                ) {
+
+                    return false;
+
+                }
+
+                return isColliding(
+                    this,
+                    building
+                );
+
+            }
+        );
+
+    }
+
+    //teleport to electric zone//
+
+    returnToChargingZone() {
+
+        this.x =
+            chargeZone.x +
+            chargeZone.width / 2 -
+            this.width / 2;
+
+        this.y =
+            chargeZone.y +
+            chargeZone.height / 2 -
+            this.height / 2;
+
+        this.velocityX = 0;
+
+        this.velocityY = 0;
+
+        this.battery =
+            this.maxBattery;
+
+    }
+
+    //reset when pressed//
+
+    reset(x, y) {
+
+        this.x = x;
+
+        this.y = y;
+
+        this.velocityX = 0;
+
+        this.velocityY = 0;
+
+        this.angle = 0;
+
+        this.battery =
+            this.maxBattery;
+
+        this.carryingPackage =
+            false;
+
+    }
+
+}
+
+//current player//
+
+const player =
+    new PlayerVehicle(
+        120,
+        220
+    );
+
+//keep player from leaving screen//
+
+function keepPlayerInsideCanvas() {
+
+    if (
+        player.x < 0
+    ) {
+
+        player.x = 0;
+
+        player.velocityX = 0;
+
+    }
+
+    if (
+        player.y < 0
+    ) {
+
+        player.y = 0;
+
+        player.velocityY = 0;
+
+    }
+
+    if (
+        player.x +
+        player.width >
+        canvas.width
+    ) {
+
+        player.x =
+            canvas.width -
+            player.width;
+
+        player.velocityX = 0;
+
+    }
+
+    if (
+        player.y +
+        player.height >
+        canvas.height
+    ) {
+
+        player.y =
+            canvas.height -
+            player.height;
+
+        player.velocityY = 0;
+
+    }
+
+}
+
+//drawing the town//
+
+function drawTown() {
+
+    // Grass
+
+    context.fillStyle =
+        "#7fb069";
+
+    context.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    // Roads
+
+    context.fillStyle =
+        "#555";
+
+    for (
+        const road of roads
+    ) {
+
+        context.fillRect(
+            road.x,
+            road.y,
+            road.width,
+            road.height
+        );
+
+    }
+
+    // Road markings
+
+    context.strokeStyle =
+        "#f5d76e";
+
+    context.lineWidth = 3;
+
+    context.setLineDash([
+        15,
+        15
+    ]);
+
+    for (
+        const road of roads
+    ) {
+
+        // Horizontal
+
+        if (
+            road.width >
+            road.height
+        ) {
+
+            const centerY =
+                road.y +
+                road.height / 2;
+
+            context.beginPath();
+
+            context.moveTo(
+                road.x,
+                centerY
+            );
+
+            context.lineTo(
+                road.x +
+                road.width,
+                centerY
+            );
+
+            context.stroke();
+
+        }
+
+        // Vertical
+
+        else {
+
+            const centerX =
+                road.x +
+                road.width / 2;
+
+            context.beginPath();
+
+            context.moveTo(
+                centerX,
+                road.y
+            );
+
+            context.lineTo(
+                centerX,
+                road.y +
+                road.height
+            );
+
+            context.stroke();
+
+        }
+
+    }
+
+    context.setLineDash([]);
+
+}
+
+//drawing the buildings in the town//
+
+function drawBuildings() {
+
+    for (
+        const building of buildings
+    ) {
+
+        // Electric recharge
+
+        if (
+            building.recharge
+        ) {
+
+            context.fillStyle =
+                "#4caf50";
+
+            context.fillRect(
+                building.x,
+                building.y,
+                building.width,
+                building.height
+            );
+
+            context.fillStyle =
+                "white";
+
+            context.font =
+                "bold 16px Arial";
+
+            context.textAlign =
+                "center";
+
+            context.fillText(
+                "Electric",
+                building.x +
+                building.width / 2,
+                building.y + 35
+            );
+
+            context.fillText(
+                "Charge",
+                building.x +
+                building.width / 2,
+                building.y + 58
+            );
+
+            context.font =
+                "28px Arial";
+
+            context.fillText(
+                "☀",
+                building.x +
+                building.width / 2,
+                building.y + 88
+            );
+
+        }
+
+        // Normal building
+
+        else {
+
+            context.fillStyle =
+                "#777";
+
+            context.fillRect(
+                building.x,
+                building.y,
+                building.width,
+                building.height
+            );
+
+            context.fillStyle =
+                "white";
+
+            context.font =
+                "14px Arial";
+
+            context.textAlign =
+                "center";
+
+            context.fillText(
+                building.name,
+                building.x +
+                building.width / 2,
+                building.y + 30
+            );
+
+        }
+
+    }
+
+    context.textAlign =
+        "left";
+
+}
+
+//draw electric zone//
+
+function drawChargeZone() {
+
+    context.fillStyle =
+        "rgba(255, 220, 50, 0.25)";
+
+    context.fillRect(
+        chargeZone.x,
+        chargeZone.y,
+        chargeZone.width,
+        chargeZone.height
+    );
+
+    context.strokeStyle =
+        "#ffd700";
+
+    context.lineWidth = 4;
+
+    context.strokeRect(
+        chargeZone.x,
+        chargeZone.y,
+        chargeZone.width,
+        chargeZone.height
+    );
+
+}
+
+//function to draw the player//
+
+function drawPlayer() {
+
+    context.save();
+
+    // Move origin to vehicle centre
+
+    context.translate(
+        player.x +
+        player.width / 2,
+        player.y +
+        player.height / 2
+    );
+
+    // Rotate vehicle
+
+    context.rotate(
+        player.angle
+    );
+
+    // Vehicle
+
+    context.fillStyle =
+        player.carryingPackage
+            ? "pink"
+            : "blue";
+
+    context.fillRect(
+        -player.width / 2,
+        -player.height / 2,
+        player.width,
+        player.height
+    );
+
+    // Front of vehicle
+
+    context.fillStyle =
+        "white";
+
+    context.fillRect(
+        player.width / 2 - 5,
+        -player.height / 2,
+        5,
+        player.height
+    );
+
+    context.restore();
+
+}
+
+//recharging//
+
+function rechargePlayer(deltaTime) {
+
+    if (
+        !playerInsideChargeZone()
+    ) {
+
+        return;
+
+    }
+
+    player.battery +=
+        chargeZone.rechargeRate *
+        deltaTime;
+
+    player.battery =
+        Math.min(
+            player.battery,
+            player.maxBattery
+        );
+
+}
+
+//creating the packages//
+
+const deliveryPackage = {
+
+    x: 200,
+
+    y: 300,
+
+    width: 18,
+
+    height: 18,
+
+    collected: false,
+
+    destination: null
+
+};
+
+//function for where the package should go//
+
+function chooseDeliveryDestination() {
+
+    const index =
+        Math.floor(
+            Math.random() *
+            deliveryPoints.length
+        );
+
+    deliveryPackage.destination =
+        deliveryPoints[index];
+
+}
+
+//keeps packages spawning in game//
+
+function respawnPackage() {
+
+    chooseDeliveryDestination();
+
+    let validPosition =
+        false;
+
+    let attempts = 0;
+
+    const MAX_ATTEMPTS =
+        200;
+
+    while (
+        !validPosition &&
+        attempts < MAX_ATTEMPTS
+    ) {
+
+        attempts++;
+
+        deliveryPackage.x =
+            Math.random() *
+            (
+                canvas.width -
+                deliveryPackage.width
+            );
+
+        deliveryPackage.y =
+            Math.random() *
+            (
+                canvas.height -
+                deliveryPackage.height
+            );
+
+        validPosition =
+            isValidPackagePosition(
+                deliveryPackage,
+                deliveryPackage.destination
+            );
+
+    }
+
+    deliveryPackage.collected =
+        false;
+
+}
+
+//drawing the packages//
+
+function drawPackage() {
+
+    if (
+        deliveryPackage.collected
+    ) {
+
+        return;
+
+    }
+
+    context.fillStyle =
+        "pink";
+
+    context.fillRect(
+        deliveryPackage.x,
+        deliveryPackage.y,
+        deliveryPackage.width,
+        deliveryPackage.height
+    );
+
+    // Package tape
+
+    context.fillStyle =
+        "blue";
+
+    context.fillRect(
+        deliveryPackage.x + 7,
+        deliveryPackage.y,
+        4,
+        deliveryPackage.height
+    );
+
+}
+
+//picking up the package//
+
+function checkPackagePickup() {
+
+    if (
+        deliveryPackage.collected ||
+        !isColliding(
+            player,
+            deliveryPackage
+        )
+    ) {
+
+        return;
+
+    }
+
+    deliveryPackage.collected =
+        true;
+
+    player.carryingPackage =
+        true;
+
+}
+
+//showing where it must be delivered//
+
+function drawDeliveryPoints() {
+
+    for (
+        const point of deliveryPoints
+    ) {
+
+        const active =
+            deliveryPackage.destination === point &&
+            player.carryingPackage;
+
+        // Active destination
+
+        context.fillStyle =
+            active
+                ? "#00ff66"
+                : "gold";
+
+        context.fillRect(
+            point.x,
+            point.y,
+            point.width,
+            point.height
+        );
+
+        // Border
+
+        context.strokeStyle =
+            active
+                ? "white"
+                : "#333";
+
+        context.lineWidth = 2;
+
+        context.strokeRect(
+            point.x,
+            point.y,
+            point.width,
+            point.height
+        );
+
+        // Label
+
+        context.fillStyle =
+            "black";
+
+        context.font =
+            "10px Arial";
+
+        context.textAlign =
+            "center";
+
+        context.fillText(
+            "DELIVER",
+            point.x +
+            point.width / 2,
+            point.y + 12
+        );
+
+        context.textAlign =
+            "left";
+
+    }
+
+}
+
+//check if delivered to increase score//
+
+function checkDelivery() {
+
+    if (
+        !deliveryPackage.collected ||
+        !deliveryPackage.destination
+    ) {
+
+        return;
+
+    }
+
+    if (
+        isColliding(
+            player,
+            deliveryPackage.destination
+        )
+    ) {
+
+        deliveryPackage.collected =
+            false;
+
+        player.carryingPackage =
+            false;
+
+        score +=
+            DELIVERY_SCORE;
+
+        deliveries++;
+
+        respawnPackage();
+
+    }
+
+}
+
+//the hud//
+
+function drawHUD() {
+
+    context.fillStyle =
+        "white";
+
+    context.font =
+        "20px Arial";
+
+    // Score
+
+    context.fillText(
+        `Score: ${score}`,
+        20,
+        30
+    );
+
+    // Time
+
+    context.fillText(
+        `Time left: ${Math.ceil(timeRemaining)}`,
+        20,
+        55
+    );
+
+    // Battery label
+
+    context.fillText(
+        `Battery: ${Math.ceil(player.battery)}%`,
+        20,
+        80
+    );
+
+    // Battery background
+
+    const batteryX = 150;
+
+    const batteryY = 63;
+
+    const batteryWidth = 150;
+
+    const batteryHeight = 18;
+
+    context.fillStyle =
+        "#333";
+
+    context.fillRect(
+        batteryX,
+        batteryY,
+        batteryWidth,
+        batteryHeight
+    );
+
+    // Battery colour
+
+    if (
+        player.battery > 50
+    ) {
+
+        context.fillStyle =
+            "limegreen";
+
+    }
+
+    else if (
+        player.battery > 20
+    ) {
+
+        context.fillStyle =
+            "orange";
+
+    }
+
+    else {
+
+        context.fillStyle =
+            "red";
+
+    }
+
+    // Battery amount
+
+    context.fillRect(
+        batteryX,
+        batteryY,
+        batteryWidth *
+        (
+            player.battery /
+            player.maxBattery
+        ),
+        batteryHeight
+    );
+
+    // Border
+
+    context.strokeStyle =
+        "white";
+
+    context.strokeRect(
+        batteryX,
+        batteryY,
+        batteryWidth,
+        batteryHeight
+    );
+
+}
+
+//message when you teleport//
+
+function drawTeleportMessage() {
+
+    if (
+        teleportMessageTimer <= 0
+    ) {
+
+        return;
+
+    }
+
+    context.fillStyle =
+        "rgba(0, 0, 0, 0.8)";
+
+    context.fillRect(
+        120,
+        canvas.height / 2 - 45,
+        canvas.width - 240,
+        90
+    );
+
+    context.fillStyle =
+        "white";
+
+    context.font =
+        "bold 22px Arial";
+
+    context.textAlign =
+        "center";
+
+    context.fillText(
+        teleportMessage,
+        canvas.width / 2,
+        canvas.height / 2
+    );
+
+    context.textAlign =
+        "left";
+
+}
+
+//the time up screen draw//
+
+function drawTimesUpScreen() {
+
+    context.fillStyle =
+        "rgba(0, 0, 0, 0.75)";
+
+    context.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    context.fillStyle =
+        "white";
+
+    context.font =
+        "bold 50px Arial";
+
+    context.textAlign =
+        "center";
+
+    context.fillText(
+        "TIME'S UP!",
+        canvas.width / 2,
+        150
+    );
+
+    context.font =
+        "24px Arial";
+
+    context.fillText(
+        "Press Enter for your results",
+        canvas.width / 2,
+        canvas.height / 2 + 20
+    );
+
+    context.textAlign =
+        "left";
+
+}
+
+//results screen//
+
+function drawResultsScreen() {
+
+    context.fillStyle =
+        "rgba(0, 0, 0, 0.95)";
+
+    context.fillRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    context.textAlign =
+        "center";
+
+    context.fillStyle =
+        "white";
+
+    // Title
+
+    context.font =
+        "bold 45px Arial";
+
+    context.fillText(
+        "DELIVERY COMPLETE!",
+        canvas.width / 2,
+        100
+    );
+
+    // Deliveries
+
+    context.font =
+        "28px Arial";
+
+    context.fillText(
+        `Deliveries: ${deliveries}`,
+        canvas.width / 2,
+        190
+    );
+
+    // Score
+
+    context.fillText(
+        `Score: ${score}`,
+        canvas.width / 2,
+        240
+    );
+
+    // Restart
+
+    context.font =
+        "20px Arial";
+
+    context.fillText(
+        "Press R to play again",
+        canvas.width / 2,
+        380
+    );
+
+    context.textAlign =
+        "left";
+
+}
+
+//update//
+
+function update(deltaTime) {
+
+    //game timer//
+
+    timeRemaining -=
+        deltaTime;
+
+    if (
+        timeRemaining <= 0
+    ) {
+
+        timeRemaining = 0;
+
+        gameState =
+            "timesUp";
+
+        player.velocityX = 0;
+
+        player.velocityY = 0;
+
+        return;
+
+    }
+
+    //teleport message when battery low//
+
+    if (
+        teleportMessageTimer > 0
+    ) {
+
+        teleportMessageTimer -=
+            deltaTime;
+
+        if (
+            teleportMessageTimer <= 0
+        ) {
+
+            teleportMessageTimer = 0;
+
+            teleportMessage = "";
+
+        }
+
+    }
+
+    player.update(
+        deltaTime
+    );
+
+    rechargePlayer(
+        deltaTime
+    );
+
+    checkPackagePickup();
+
+    checkDelivery();
+
+}
+
+//restarting the game when over
+
+function restartGame() {
+
+    timeRemaining =
+        GAME_DURATION;
+
+    score = 0;
+
+    deliveries = 0;
+
+    gameState =
+        "playing";
+
+    teleportMessage = "";
+
+    teleportMessageTimer = 0;
+
+    player.reset(
+        120,
+        220
+    );
+
+    respawnPackage();
+
+    // Prevent huge delta
+
+    lastTime =
+        performance.now();
+
+}
+
+//drawing game functions//
+
+function drawGame() {
+
+    drawTown();
+
+    drawBuildings();
+
+    drawChargeZone();
+
+    drawPackage();
+
+    drawDeliveryPoints();
+
+    drawPlayer();
+
+    drawHUD();
+
+    drawTeleportMessage();
+
+}
+
+//times up frame//
+
+function drawTimeUpGame() {
+
+    drawTown();
+
+    drawBuildings();
+
+    drawChargeZone();
+
+    drawPackage();
+
+    drawDeliveryPoints();
+
+    drawPlayer();
+
+    drawHUD();
+
+    drawTimesUpScreen();
+
+}
+
+//game loops//
+
+function gameLoop(timestamp) {
+
+    // First frame
+
+    if (
+        lastTime === 0
+    ) {
+
+        lastTime =
+            timestamp;
+
+    }
+
+    // Limit delta time
+
+    const deltaTime =
+        Math.min(
+            (
+                timestamp -
+                lastTime
+            ) / 1000,
+            0.05
+        );
+
+    lastTime =
+        timestamp;
+
+    // Clear canvas
+
+    context.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    //game states//
+
+    switch (
+    gameState
+    ) {
+
+        case "playing":
+
+            update(
+                deltaTime
+            );
+
+            drawGame();
+
+            break;
+
+        case "timesUp":
+
+            drawTimeUpGame();
+
+            break;
+
+        case "results":
+
+            drawResultsScreen();
+
+            break;
+
+    }
+
+    requestAnimationFrame(
+        gameLoop
+    );
+
+}
+
+//game start//
+
+respawnPackage();
+
+requestAnimationFrame(
+    gameLoop
+);
+
